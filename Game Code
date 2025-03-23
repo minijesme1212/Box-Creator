@@ -1,0 +1,227 @@
+import pygame
+import sys
+
+# Initialize Pygame
+pygame.init()
+
+# Game settings
+WIDTH, HEIGHT = 1369, 710
+FPS = 60
+GRAVITY = 0.5
+JUMP_STRENGTH = -15
+GROUND_Y = HEIGHT - 100
+BOX_PUSH_STRENGTH = 9
+# Colors
+WHITE = (255, 255, 255)
+BLUE = (0, 0, 255)
+RED = (255, 0, 0)
+GREEN = (0, 255, 0)
+BLACK = (0, 0, 0)
+
+# Create screen
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Box Creator")
+
+# Define Player class
+class Player(pygame.sprite.Sprite):
+    def __init__(self):
+        super().__init__()
+        self.image = pygame.Surface((50, 50))
+        self.image.fill(RED)
+        self.rect = self.image.get_rect()
+        self.rect.center = (WIDTH // 2, HEIGHT // 2)
+        self.velocity = pygame.Vector2(0, 0)
+        self.is_holding_box = False
+        self.held_box = None  # The box that the player is holding (if any)
+
+    def update(self):
+        keys = pygame.key.get_pressed()
+
+        # WASD movement
+        if keys[pygame.K_a]:  # Move left
+            self.velocity.x = -10
+        elif keys[pygame.K_d]:  # Move right
+            self.velocity.x = 10
+        else:
+            self.velocity.x = 0
+
+        # Jumping with W (spacebar behavior)
+        if keys[pygame.K_w] and self.rect.bottom >= GROUND_Y:
+            self.velocity.y = JUMP_STRENGTH
+
+        # Apply gravity
+        self.velocity.y += GRAVITY
+
+        # Update position
+        self.rect.x += self.velocity.x
+        self.rect.y += self.velocity.y
+
+        # Handle collision with boxes
+        self.handle_box_collisions()
+
+        # Keep player on the ground
+        if self.rect.bottom >= GROUND_Y:
+            self.rect.bottom = GROUND_Y
+            self.velocity.y = 0
+
+        # Boundaries
+        if self.rect.left < 0:
+            self.rect.left = 0
+        if self.rect.right > WIDTH:
+            self.rect.right = WIDTH
+
+        # If holding a box, move it with the player
+        if self.is_holding_box and self.held_box:
+            self.held_box.rect.center = self.rect.center
+            # Optionally offset the box to avoid overlapping with the player
+            self.held_box.rect.x = self.rect.x + 25
+
+    def handle_box_collisions(self):
+        # Only check collisions with boxes that the player is not holding
+        for box in boxes:
+            if box != self.held_box:  # Skip held box
+                if self.rect.colliderect(box.rect):
+                    # Handle collision if falling on top of a box
+                    if self.velocity.y > 0 and self.rect.bottom <= box.rect.top:
+                        self.rect.bottom = box.rect.top
+                        self.velocity.y = 0  # Stop falling when landing on the box
+                        break
+
+                    # If the player is moving left or right, apply push forces to boxes
+                    if self.rect.colliderect(box.rect):
+                        if self.velocity.x > 0 and box.rect.left > self.rect.left:
+                            box.velocity.x = BOX_PUSH_STRENGTH
+                        elif self.velocity.x < 0 and box.rect.right < self.rect.right:
+                            box.velocity.x = -BOX_PUSH_STRENGTH
+
+    def grab_box(self):
+        # Check if the player is close to a box and right-clicking
+        for box in boxes:
+            if self.rect.colliderect(box.rect):
+                self.is_holding_box = True
+                self.held_box = box
+                box.velocity.x = 0  # Stop box from moving when held
+                break
+
+    def release_box(self):
+        # Release the box when the right-click is released
+        if self.held_box:
+            self.is_holding_box = False
+            self.held_box.velocity.x = 0  # Stop any horizontal movement when dropped
+            self.held_box = None
+
+# Define Box class for physics
+class Box(pygame.sprite.Sprite):
+    def __init__(self, x, y):
+        super().__init__()
+        self.image = pygame.Surface((50, 50))
+        self.image.fill(GREEN)
+        self.rect = self.image.get_rect()
+        self.rect.topleft = (x, y)
+        self.velocity = pygame.Vector2(0, 0)
+
+    def update(self):
+        # Apply gravity
+        self.velocity.y += GRAVITY
+
+        # Update position
+        self.rect.x += self.velocity.x
+        self.rect.y += self.velocity.y
+
+        # Collision with the ground
+        if self.rect.bottom >= GROUND_Y:
+            self.rect.bottom = GROUND_Y
+            self.velocity.y = 0
+
+        # Box-to-box collisions: Stack boxes if they collide
+        self.check_box_collision()
+
+        # Boundaries
+        if self.rect.left < 0:
+            self.rect.left = 0
+        if self.rect.right > WIDTH:
+            self.rect.right = WIDTH
+
+    def check_box_collision(self):
+        for other_box in boxes:
+            if self != other_box and self.rect.colliderect(other_box.rect):
+                # Make sure that we only push the box horizontally, no vertical overlap
+                if self.rect.bottom > other_box.rect.top:
+                    if self.velocity.x > 0:
+                        self.velocity.x = -BOX_PUSH_STRENGTH
+                    elif self.velocity.x < 0:
+                        self.velocity.x = BOX_PUSH_STRENGTH
+
+                # If the box is falling and collides with another, stop it from falling
+                if self.rect.bottom > other_box.rect.top:
+                    self.rect.bottom = other_box.rect.top
+                    self.velocity.y = 0  # Stop falling
+
+                # Ensure boxes don't overlap horizontally
+                if self.rect.left < other_box.rect.right and self.rect.right > other_box.rect.left:
+                    if self.rect.bottom <= other_box.rect.top:
+                        self.rect.bottom = other_box.rect.top
+                        self.velocity.y = 0
+
+# Create sprite groups
+player = Player()
+all_sprites = pygame.sprite.Group()
+all_sprites.add(player)
+
+boxes = pygame.sprite.Group()
+
+# Create reset button (top-left corner)
+reset_button = pygame.Rect(10, 10, 100, 40)  # Button size and position
+font = pygame.font.SysFont(None, 30)
+reset_text = font.render("Reset", True, BLACK)
+
+# Main game loop
+clock = pygame.time.Clock()
+running = True
+
+while running:
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+
+        # Spawn a box when left-click is detected
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:  # Left click
+            # Check if the reset button was clicked
+            if reset_button.collidepoint(event.pos):
+                # Clear all boxes from both groups (all_sprites and boxes)
+                boxes.empty()
+                all_sprites = pygame.sprite.Group()  # Reset all_sprites group to clear all objects
+                all_sprites.add(player)  # Add the player back to the sprite group
+            else:
+                # Spawn a box at the mouse position
+                x, y = pygame.mouse.get_pos()
+                box = Box(x - 25, y - 25)  # Offset by half box size
+                boxes.add(box)
+                all_sprites.add(box)
+
+      
+    # Update
+    all_sprites.update()
+
+    # Fill screen with white
+    screen.fill(WHITE)
+
+    # Draw all sprites
+    all_sprites.draw(screen)
+
+    # Draw ground
+    pygame.draw.rect(screen, BLUE, (0, GROUND_Y, WIDTH, 100))
+
+    # Draw the reset button
+    pygame.draw.rect(screen, (200, 0, 0), reset_button)  # Red button
+    screen.blit(reset_text, (reset_button.x + 25, reset_button.y + 5))  # Button text
+
+    # Update display
+    pygame.display.flip()
+
+    # Tick the clock
+    clock.tick(FPS)
+
+# Quit Pygame
+pygame.quit()
+sys.exit()
